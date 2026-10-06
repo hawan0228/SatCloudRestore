@@ -73,5 +73,11 @@ flowchart TB
 
 Gradio Demo 使用已訓練的 checkpoint。可選測試影像或上傳 RGB 圖片，調整雲覆蓋率、不透明度、DDIM 步數、取樣次數與種子，查看遮罩、Telea 與擴散模型的修復結果、取樣變異圖及指標。Demo 會先把選取或上傳的影像當作乾淨參考並加上合成雲，因此顯示的指標只衡量這個合成雲任務。
 
-![Demo](images\demo1.png)
-![Demo](images\demo2.png)
+<table>
+  <tr>
+    <td>
+      <img src="images/demo1.png" alt="擴散模型去雲 Demo">
+      <img src="images/demo2.png" alt="擴散模型去雲 Demo">
+    </td>
+  </tr>
+</table>
