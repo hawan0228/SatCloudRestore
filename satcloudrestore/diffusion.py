@@ -24,6 +24,17 @@ def extract(buffer: torch.Tensor, timesteps: torch.Tensor, shape: torch.Size | t
     return values.reshape(timesteps.shape[0], *((1,) * (len(shape) - 1)))
 
 
+def stratified_validation_timesteps(batch_size: int, timesteps: int, batch_index: int,
+                                    device: torch.device | str) -> torch.Tensor:
+    """Deterministically cover the full diffusion horizon in every validation batch."""
+    if batch_size < 1 or timesteps < 2:
+        raise ValueError("batch_size must be positive and timesteps at least 2")
+    if batch_size == 1:
+        return torch.tensor([batch_index % timesteps], device=device, dtype=torch.long)
+    values = torch.linspace(0, timesteps - 1, batch_size, device=device).round().long()
+    return torch.roll(values, shifts=batch_index % batch_size)
+
+
 class GaussianDiffusion(nn.Module):
     def __init__(self, timesteps: int = 200, beta_schedule: str = "linear"):
         super().__init__()
@@ -65,10 +76,13 @@ class GaussianDiffusion(nn.Module):
     def sample(self, model: nn.Module, cloudy: torch.Tensor, mask: torch.Tensor, seed: int = 42) -> torch.Tensor:
         generator = torch.Generator(device=cloudy.device).manual_seed(seed)
         x = torch.randn(cloudy.shape, device=cloudy.device, generator=generator)
+        known_noise = torch.randn(cloudy.shape, device=cloudy.device, dtype=cloudy.dtype, generator=generator)
         for step in reversed(range(self.timesteps)):
             t = torch.full((cloudy.shape[0],), step, device=cloudy.device, dtype=torch.long)
+            known_xt = self.q_sample(cloudy, t, known_noise)
+            x = x * mask + known_xt * (1 - mask)
             x = self.p_sample(model, x, t, cloudy, mask, generator)
-        return x.clamp(-1, 1)
+        return (x.clamp(-1, 1) * mask + cloudy * (1 - mask)).clamp(-1, 1)
 
 
 def weighted_noise_loss(prediction: torch.Tensor, noise: torch.Tensor, mask: torch.Tensor, mask_weight: float) -> torch.Tensor:

@@ -22,10 +22,14 @@ def load_config(path: str | Path) -> dict[str, Any]:
         raise ValueError("image_size must be a positive multiple of 4")
     if config["model"].get("in_channels") != 7 or config["model"].get("out_channels") != 3:
         raise ValueError("Conditional U-Net requires exactly 7 input and 3 output channels")
+    if config["model"].get("upsample_mode", "transpose") not in {"transpose", "resize_conv"}:
+        raise ValueError("model.upsample_mode must be transpose or resize_conv")
     if config["diffusion"].get("timesteps", 0) < 2:
         raise ValueError("diffusion.timesteps must be at least 2")
     if config["diffusion"].get("beta_schedule") not in {"linear", "cosine"}:
         raise ValueError("diffusion.beta_schedule must be linear or cosine")
+    if not isinstance(config["diffusion"].get("require_near_zero_terminal", False), bool):
+        raise ValueError("diffusion.require_near_zero_terminal must be boolean")
     for name in ("train", "validation", "test"):
         if int(config["splits"].get(name, 0)) <= 0:
             raise ValueError(f"splits.{name} must be positive")

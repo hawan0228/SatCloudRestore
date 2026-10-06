@@ -43,10 +43,24 @@ class ResBlock(nn.Module):
         return h + self.skip(x)
 
 
+class ResizeConv(nn.Sequential):
+    """Artifact-resistant 2x upsampling with uniform spatial coverage."""
+
+    def __init__(self, in_channels: int, out_channels: int):
+        super().__init__(
+            nn.Upsample(scale_factor=2, mode="nearest"),
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+        )
+
+
 class ConditionalUNet(nn.Module):
     def __init__(self, in_channels: int = 7, out_channels: int = 3, base_channels: int = 32,
-                 channel_multipliers: list[int] | tuple[int, ...] = (1, 2, 4), time_dim: int = 128):
+                 channel_multipliers: list[int] | tuple[int, ...] = (1, 2, 4), time_dim: int = 128,
+                 upsample_mode: str = "transpose"):
         super().__init__()
+        if upsample_mode not in {"transpose", "resize_conv"}:
+            raise ValueError("upsample_mode must be 'transpose' or 'resize_conv'")
+        self.upsample_mode = upsample_mode
         channels = [base_channels * m for m in channel_multipliers]
         self.time_embed = nn.Sequential(SinusoidalTimeEmbedding(time_dim), nn.Linear(time_dim, time_dim), nn.SiLU(), nn.Linear(time_dim, time_dim))
         self.input = nn.Conv2d(in_channels, channels[0], 3, padding=1)
@@ -63,7 +77,11 @@ class ConditionalUNet(nn.Module):
             self.up_blocks.append(ResBlock(current + ch, ch, time_dim))
             current = ch
             if i > 0:
-                self.upsamples.append(nn.ConvTranspose2d(ch, channels[i - 1], 4, stride=2, padding=1))
+                if upsample_mode == "transpose":
+                    upsample = nn.ConvTranspose2d(ch, channels[i - 1], 4, stride=2, padding=1)
+                else:
+                    upsample = ResizeConv(ch, channels[i - 1])
+                self.upsamples.append(upsample)
                 current = channels[i - 1]
         self.output = nn.Sequential(nn.GroupNorm(group_count(channels[0]), channels[0]), nn.SiLU(), nn.Conv2d(channels[0], out_channels, 3, padding=1))
 

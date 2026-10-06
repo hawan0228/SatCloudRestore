@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT))
 
 from satcloudrestore.config import load_config
 from satcloudrestore.dataset import CloudDataset
-from satcloudrestore.diffusion import GaussianDiffusion, weighted_noise_loss
+from satcloudrestore.diffusion import GaussianDiffusion, stratified_validation_timesteps, weighted_noise_loss
 from satcloudrestore.model import build_model
 from satcloudrestore.sampling import ddim_sample
 from satcloudrestore.utils import (
@@ -123,6 +123,12 @@ def main() -> None:
     model = build_model(cfg["model"]).to(device)
     ema = copy.deepcopy(model).eval()
     diffusion = GaussianDiffusion(cfg["diffusion"]["timesteps"], cfg["diffusion"]["beta_schedule"]).to(device)
+    terminal_alpha_bar = float(diffusion.alpha_bars[-1].detach().cpu())
+    if cfg["diffusion"].get("require_near_zero_terminal", False) and terminal_alpha_bar > 1e-3:
+        raise ValueError(
+            f"Diffusion terminal alpha_bar={terminal_alpha_bar:.6g} is too large for pure-noise sampling; "
+            "use a schedule with a near-zero terminal value"
+        )
     optimizer = torch.optim.AdamW(model.parameters(), lr=tc["learning_rate"], weight_decay=tc["weight_decay"])
     total_epochs = int(tc["epochs"])
     if args.overfit_batch and max_steps:
@@ -155,6 +161,9 @@ def main() -> None:
     print(f"Batch size: {batch_size}; gradient accumulation: {accumulation}; effective batch size: {batch_size * accumulation}")
     print(f"Trainable parameters: {parameter_count:,}")
     print(f"Images: train={len(train_set)}, validation={len(val_set)}")
+    print(f"Diffusion terminal alpha_bar: {terminal_alpha_bar:.8f}")
+    if terminal_alpha_bar > 1e-2:
+        print("WARNING: terminal alpha_bar is not near zero; pure-noise sampling may be out of distribution")
     print(f"Maximum optimizer steps: {max_steps if max_steps is not None else 'unlimited'}")
     print(f"Checkpoint directory: {output}")
     print(f"Result directory: {result_dir}")
@@ -201,7 +210,7 @@ def main() -> None:
         with torch.no_grad():
             for index, batch in enumerate(val_loader):
                 clean, cloudy, mask = (batch[key].to(device, non_blocking=True) for key in ("clean", "cloudy", "mask"))
-                t = torch.full((clean.shape[0],), diffusion.timesteps // 2, device=device, dtype=torch.long)
+                t = stratified_validation_timesteps(clean.shape[0], diffusion.timesteps, index, device)
                 generator = torch.Generator(device=device).manual_seed(cfg["seed"] + index)
                 noise = torch.randn(clean.shape, device=device, generator=generator)
                 prediction = ema(torch.cat((diffusion.q_sample(clean, t, noise), cloudy, mask), 1), t)

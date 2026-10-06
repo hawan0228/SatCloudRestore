@@ -15,10 +15,16 @@ def ddim_sample(model: nn.Module, diffusion: GaussianDiffusion, cloudy: torch.Te
         raise ValueError("eta must be non-negative")
     generator = torch.Generator(device=cloudy.device).manual_seed(seed)
     x = torch.randn(cloudy.shape, device=cloudy.device, dtype=cloudy.dtype, generator=generator)
+    # Training observes q(x_t | clean) in known regions. Keep those regions on
+    # the same forward-diffusion trajectory during inpainting instead of asking
+    # the model to generate them freely and replacing them only at the end.
+    known_noise = torch.randn(cloudy.shape, device=cloudy.device, dtype=cloudy.dtype, generator=generator)
     sequence = torch.linspace(diffusion.timesteps - 1, 0, steps, device=cloudy.device).long()
     intermediates = []
     for index, current in enumerate(sequence):
         t = torch.full((cloudy.shape[0],), int(current), device=cloudy.device, dtype=torch.long)
+        known_xt = diffusion.q_sample(cloudy, t, known_noise)
+        x = x * mask + known_xt * (1 - mask)
         predicted_noise = model(torch.cat((x, cloudy, mask), dim=1), t)
         x0 = diffusion.predict_x0(x, t, predicted_noise)
         if index == len(sequence) - 1:

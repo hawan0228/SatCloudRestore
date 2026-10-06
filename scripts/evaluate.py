@@ -65,6 +65,9 @@ def main() -> None:
     requested_ids = parse_image_ids(args.image_ids)
 
     model, diffusion, checkpoint = load_model_bundle(args.checkpoint, cfg, device)
+    terminal_alpha_bar = float(diffusion.alpha_bars[-1].detach().cpu())
+    if cfg["diffusion"].get("require_near_zero_terminal", False) and terminal_alpha_bar > 1e-3:
+        raise ValueError(f"Diffusion terminal alpha_bar={terminal_alpha_bar:.6g} is too large")
     experiment_name = checkpoint.get("experiment_name") or Path(args.checkpoint).resolve().parent.name
     out = Path(args.output_dir) if args.output_dir else Path(cfg["paths"]["results_dir"]) / experiment_name
     out = out.resolve()
@@ -107,6 +110,7 @@ def main() -> None:
     print(f"Checkpoint: {Path(args.checkpoint).resolve()}")
     print(f"Result directory: {out}")
     print(f"Evaluation images: {len(selected)}; DDIM steps: {ddim_steps}; samples: {samples}")
+    print(f"Diffusion terminal alpha_bar: {terminal_alpha_bar:.8f}")
 
     rows, correlations = [], []
     for index, batch in enumerate(tqdm(loader, total=len(selected), desc="evaluating")):
